@@ -20,7 +20,6 @@ use strict;
 use warnings;
 use diagnostics;
 use feature 'say';
-use Data::Dumper;
 use LWP::UserAgent;
 use HTML::Entities;
 use File::Temp qw(tempdir);
