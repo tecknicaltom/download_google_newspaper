@@ -98,7 +98,7 @@ my $tempdir;
 #else
 {
 	$tempdir = tempdir( 'tmp.XXXXXXXX', DIR=>'.');
-	for my $tid (0..$num_tiles)
+	for my $tid (0 .. $num_tiles - 1)
 	{
 		printf "\r%d / %d", $tid+1, $num_tiles;
 		STDOUT->flush();
@@ -121,7 +121,7 @@ if (-e $out)
 my ($x, $y) = (0,0);
 my ($megatile_x, $megatile_y) = (0,0);
 my %filenames;
-for my $tid (0..$num_tiles)
+for my $tid (0 .. $num_tiles - 1)
 {
 	my ($x_pos, $y_pos) = ($x*3+$megatile_x, $y*3+$megatile_y);
 
