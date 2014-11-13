@@ -24,20 +24,25 @@ use LWP::UserAgent;
 use HTML::Entities;
 use File::Temp qw(tempdir);
 use POSIX;
+use JSON;
+use Getopt::Long qw( :config posix_default bundling no_ignore_case );
+use IO::Handle;
 
-if (scalar(@ARGV) != 1)
-{
-	say "Usage: $0 url";
-	exit;
-}
-
-my $url = $ARGV[0];
+my $page_arg;
+GetOptions("page|p=i" => \$page_arg)
+	or die "Usage: $0 [--page page] url";
 
 my $user_agent = "Mozilla/5.0 (X11; Linux x86_64; rv:18.0) Gecko/20100101 Firefox/18.0";
 my $ua = new LWP::UserAgent(
 	agent=>$user_agent,
 	);
 
+if(@ARGV != 1)
+{
+	die "Usage: $0 [--page page] url";
+}
+
+my ($url) = @ARGV;
 my $response = $ua->get($url);
 die "Unable to fetch page: ".$response->as_string if ($response->is_error);
 my $content = $response->content;
@@ -46,11 +51,39 @@ die "Unable to parse title from page" unless($title);
 decode_entities($title);
 $title =~ s/\xa0/ /g;
 say $title;
-my ($page) = $content =~ /<input name=jtp id=jtp value="(\d+)"/;
-say "Page $page";
 
+my $page;
+my ($height, $width);
 my $zoom = 6;
-my ($height, $width) = $content =~ /{"h":(\d+),"w":(\d+),"z":$zoom}/;
+
+if (defined($page_arg))
+{
+	$content =~ /_OC_Run\((.*)\);<\/script\>/;
+	my $data = from_json("[$1]");
+	my @pages = @{$data->[0]->{page}};
+	if ($page_arg < 1 || $page_arg > scalar(@pages))
+	{
+		die "Error: Invalid page";
+	}
+	my $page_data = $pages[$page_arg - 1];
+	$page = $page_arg;
+	my $prefix = $data->[0]->{prefix};
+	$url = "$prefix&pg=$page_data->{pid}";
+	say $url;
+
+	my $page_info_response = $ua->get("$url&jscmd=click3");
+	die "Unable to fetch info page: ".$page_info_response->as_string if ($page_info_response->is_error);
+	my $page_info = from_json($page_info_response->content);
+	my $tile_res_arr = $page_info->{page}->[0]->{additional_info}->{'[NewspaperJSONPageInfo]'}->{tileres};
+	my ($tile_res) = grep { $_->{z} == $zoom } @$tile_res_arr;
+	($width, $height) = ($tile_res->{w}, $tile_res->{h});
+}
+else
+{
+	($page) = $content =~ /<input name=jtp id=jtp value="(\d+)"/;
+	($height, $width) = $content =~ /{"h":(\d+),"w":(\d+),"z":$zoom}/;
+}
+say "Page $page";
 
 my $s = 256;
 my $num_tiles_x = ceil($width / $s);
@@ -58,19 +91,22 @@ my $num_tiles_y = ceil($height / $s);
 my $num_tiles = $num_tiles_x*$num_tiles_y;
 
 my $tempdir;
-if (scalar(@ARGV) >= 2)
-{
-	$tempdir = $ARGV[1];
-}
-else
+#if (scalar(@ARGV) >= 2)
+#{
+#	$tempdir = $ARGV[1];
+#}
+#else
 {
 	$tempdir = tempdir( 'tmp.XXXXXXXX', DIR=>'.');
 	for my $tid (0..$num_tiles)
 	{
+		printf "\r%d / %d", $tid+1, $num_tiles;
+		STDOUT->flush();
 		my $tile = sprintf "%04d", $tid;
 		my $request = HTTP::Request->new(GET => $url . "&img=1&zoom=$zoom&tid=$tid");
 		my $response = $ua->request($request, "$tempdir/tile$tile.jpg");
 	}
+	print "\n";
 }
 
 my $out = "$title - Page $page.png";
@@ -110,5 +146,5 @@ for my $y (0 .. $num_tiles_y - 1)
 }
 system "montage", "-mode", "Concatenate", "-tile", "${num_tiles_x}x${num_tiles_y}", @ordered_filenames, $out;
 
-say $out;
+say "'$out'";
 
