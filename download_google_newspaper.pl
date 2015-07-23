@@ -28,21 +28,46 @@ use JSON;
 use Getopt::Long qw( :config posix_default bundling no_ignore_case );
 use IO::Handle;
 
+use constant DEFAULT_NUM_THREADS => 5;
+
 my $page_arg;
-GetOptions("page|p=i" => \$page_arg)
-	or die "Usage: $0 [--page page] url";
+my $threads_arg;
+GetOptions("page|p=i" => \$page_arg, "threads|j=i" => \$threads_arg)
+	or die "Usage: $0 [--page page] [--threads num_threads] url";
+
+if(@ARGV != 1)
+{
+	die "Usage: $0 [--page page] [--threads num_threads] url";
+}
+
+my ($url) = @ARGV;
+
+my $forkmanager;
+eval "use Parallel::ForkManager";
+if ($@)
+{
+	if(defined($threads_arg))
+	{
+		say "Warning: Parallel::ForkManager not found, defaulting to single-threaded";
+	}
+}
+else
+{
+	my $num_threads = defined($threads_arg) ? 0+$threads_arg : DEFAULT_NUM_THREADS;
+	if($num_threads < 1)
+	{
+		say "Warning: illegal value for number of threads. Defaulting to ".DEFAULT_NUM_THREADS;
+		$num_threads = DEFAULT_NUM_THREADS;
+	}
+	$forkmanager = Parallel::ForkManager->new($num_threads);
+}
+
 
 my $user_agent = "Mozilla/5.0 (X11; Linux x86_64; rv:18.0) Gecko/20100101 Firefox/18.0";
 my $ua = new LWP::UserAgent(
 	agent=>$user_agent,
 	);
 
-if(@ARGV != 1)
-{
-	die "Usage: $0 [--page page] url";
-}
-
-my ($url) = @ARGV;
 my $response = $ua->get($url);
 die "Unable to fetch page: ".$response->as_string if ($response->is_error);
 my $content = $response->content;
@@ -102,9 +127,21 @@ my $tempdir;
 	{
 		printf "\r%d / %d", $tid+1, $num_tiles;
 		STDOUT->flush();
+		if ($forkmanager)
+		{
+			$forkmanager->start and next;
+		}
 		my $tile = sprintf "%04d", $tid;
 		my $request = HTTP::Request->new(GET => $url . "&img=1&zoom=$zoom&tid=$tid");
 		my $response = $ua->request($request, "$tempdir/tile$tile.jpg");
+		if ($forkmanager)
+		{
+			$forkmanager->finish();
+		}
+	}
+	if ($forkmanager)
+	{
+		$forkmanager->wait_all_children();
 	}
 	print "\n";
 }
